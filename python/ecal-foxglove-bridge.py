@@ -106,6 +106,8 @@ class TimeSource(Enum):
     SEND_TIMESTAMP = 1
     LOCAL_TIME = 2
 
+messages_dropped = 0
+
 async def submit_to_queue(queue, id, topic_name, msg, send_time):
    try:
        timestamp = time.time_ns()
@@ -113,7 +115,10 @@ async def submit_to_queue(queue, id, topic_name, msg, send_time):
        datum = ServerDatum(id=id, timestamp = timestamp, msg = msg)
        queue.put_nowait(datum)
    except asyncio.QueueFull:
-       print("dropping message")        
+       global messages_dropped
+       global logger
+       messages_dropped = messages_dropped + 1
+       logger.info("Dropping message of channel {}. Total messages dropped: {}".format(topic_name, messages_dropped))        
    except Exception as e:
        print("Caught exception in callback {}".format(e))   
     
@@ -215,14 +220,14 @@ async def handle_messages(queue: asyncio.Queue[ServerDatum], server: FoxgloveSer
         )
 
 
-async def main():
+async def main(args):
     ecal_core.initialize(sys.argv, "eCAL WS Gateway")
     ecal_core.mon_initialize()
     
     # sleep 1 second so monitoring info will be available
     await asyncio.sleep(1)
 
-    queue: asyncio.Queue[ServerDatum] = asyncio.Queue(maxsize = 3)
+    queue: asyncio.Queue[ServerDatum] = asyncio.Queue(maxsize = 10)
     
     async with FoxgloveServer("0.0.0.0", 8765, "example server", logger=logger) as server:
         connection_handler = ConnectionHandler(server, queue)
@@ -237,6 +242,16 @@ async def main():
         while True:
             await asyncio.sleep(0.5)
 
+def version_information():
+  return '''ecal-foxglove-bridge {} using ecal: {}'''.format("0.2.0", ecal_core.getversion())
+
+def parse_arguments():
+  parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
+  parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
+  parser.add_argument('--version', action='version', version=version_information())
+  args = parser.parse_args()     
+  return args
 
 if __name__ == "__main__":
-    run_cancellable(main())
+    args = parse_arguments()
+    run_cancellable(main(args))
