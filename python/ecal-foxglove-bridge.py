@@ -9,6 +9,8 @@ import argparse
 import base64
 from enum import Enum
 import logging
+import os
+import platform
 import sys
 import time
 from typing import TYPE_CHECKING, Type, NamedTuple
@@ -35,6 +37,11 @@ def get_ecal_encoding(foxglove_encoding : str):
         return foxglove_ecal_encoding_mapping[foxglove_encoding]
     except KeyError:
         return ""
+
+def is_my_own_topic(topic):
+    my_host = platform.node()
+    my_pid = os.getpid()
+    return my_pid == topic['pid'] and my_host == topic['hname']
 
 
 class MyChannelWithoutId(NamedTuple):
@@ -104,7 +111,8 @@ class Monitoring(object):
             return current_topics
 
         for topic in topics:
-            if topic['direction']=='publisher':
+            # only filter topics which are publishers, published by a different proces
+            if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
                 current_topic = {}
                 current_topic["topic"] = topic["tname"]
                 try:
