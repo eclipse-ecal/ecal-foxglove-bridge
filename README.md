@@ -31,9 +31,9 @@ It can then create eCAL subscribers for the requested data and forward it to Stu
 ## Known limitations
 
 ### Bandwith of the websocket connection
-The bandwidth of the Websocket connection is significantly slower that eCALs (SHM) bandwidth.
+~~The bandwidth of the Websocket connection is significantly slower that eCALs (SHM) bandwidth.
 Especially when trying to visualize big, high frequency data, this can be problematic.
 In order not to lag behind in case of overload, the Bridge application uses an internal queue with a fixed size.
-Hence, messages might be dropped if they cannot be sent fast enough.
-
+Hence, messages might be dropped if they cannot be sent fast enough.~~
+After deactivating compression in the websocket connection as a default, the connection seems fine. Make sure to upgrade the `foxglove-websocket` Python dependenc to the newest version (>=0.1.1).
 
