@@ -281,7 +281,11 @@ async def handle_messages(queue: asyncio.Queue[ServerDatum], server: FoxgloveSer
         )
 
 
-async def main(args):
+def main():
+    args = parse_arguments()
+    run_cancellable(execute(args)) 
+
+async def execute(args):
     ecal_core.initialize(sys.argv, "eCAL WS Gateway")
     ecal_core.mon_initialize()
     
@@ -304,15 +308,14 @@ async def main(args):
             await asyncio.sleep(0.5)
 
 def version_information():
-  return '''ecal-foxglove-bridge {} using ecal: {}'''.format("0.2.0", ecal_core.getversion())
+    return '''ecal-foxglove-bridge {} using ecal: {}'''.format("0.2.0", ecal_core.getversion())
 
 def parse_arguments():
-  parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
-  parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
-  parser.add_argument('--version', action='version', version=version_information())
-  args = parser.parse_args()     
-  return args
+    parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
+    parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
+    parser.add_argument('--version', action='version', version=version_information())
+    args = parser.parse_args()     
+    return args
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    run_cancellable(main(args))
+    main()

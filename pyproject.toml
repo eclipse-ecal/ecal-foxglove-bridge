@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecal-foxglove-bridge"
+license = {file = "LICENSE"}
+version = "0.2.0"
+dependencies = [
+    "foxglove-websocket >= 0.1.1"
+    #"ecal5",
+]
+
+[project.scripts]
+ecal_foxglove_bridge = "ecal_foxglove_bridge.ecal_foxglove_bridge:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
