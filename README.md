@@ -6,7 +6,7 @@ This repository provides an implementation to forward arbitrary eCAL (Protobuf) 
 
 ## Installation instructions
 
-Please see [Installation Instructions](python/README.md)
+Please see [Installation Instructions](ecal_foxglove_bridge/README.md)
 
 ## Usage
 
