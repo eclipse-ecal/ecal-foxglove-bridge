@@ -13,6 +13,7 @@ import os
 import platform
 import sys
 import time
+import json
 from typing import TYPE_CHECKING, Type, NamedTuple
 
 from foxglove_websocket import run_cancellable
@@ -191,17 +192,21 @@ class ConnectionHandler(MonitoringListener):
     id_channel_mapping: dict[ChannelId, str]
     server: FoxgloveServer
 
-    def __init__(self, server: FoxgloveServer, queue: asyncio.Queue[ServerDatum]):
+    def __init__(self, server: FoxgloveServer, queue: asyncio.Queue[ServerDatum], blacklist: list):
         self.topic_subscriptions = {}
         self.id_channel_mapping = {}
         self.server = server
         self.queue = queue
+        self.blacklist = blacklist
 
     def get_subscriber_by_id(self, id: ChannelId):
         return self.topic_subscriptions[self.id_channel_mapping[id]]
 
     async def on_new_topics(self, new_topics: set[MyChannelWithoutId]):
         for topic in new_topics:
+            if topic.topic in self.blacklist:
+                logger.info(f'Don\'t add "{topic.topic}" because it is in the blacklist')
+                continue
             channel_without_id = ChannelWithoutId(**topic._asdict())
             id = await self.server.add_channel(
                 channel_without_id
@@ -288,6 +293,9 @@ def main():
 async def execute(args):
     ecal_core.initialize(sys.argv, "eCAL WS Gateway")
     ecal_core.mon_initialize()
+
+    blacklist = readBlacklist()
+    logger.info(f'Blacklist: {blacklist}')
     
     # sleep 1 second so monitoring info will be available
     await asyncio.sleep(1)
@@ -295,7 +303,7 @@ async def execute(args):
     queue: asyncio.Queue[ServerDatum] = asyncio.Queue(maxsize = 10)
     
     async with FoxgloveServer("0.0.0.0", 8765, "example server", logger=logger, capabilities=["clientPublish"], supported_encodings=["json"]) as server:
-        connection_handler = ConnectionHandler(server, queue)
+        connection_handler = ConnectionHandler(server, queue, blacklist)
         server.set_listener(Listener(connection_handler))
 
         monitoring = Monitoring()
@@ -316,6 +324,14 @@ def parse_arguments():
     parser.add_argument('--version', action='version', version=version_information())
     args = parser.parse_args()     
     return args
+
+
+def readBlacklist() -> list:
+    with open('blacklist.json', 'r') as f:
+        data = json.load(f)
+        return data
+
+
 
 if __name__ == "__main__":
     main()

@@ -19,6 +19,17 @@ You can use any of the available panels to visualize the data.
 Beware that some panels (like the image visualization panel or the 3D panel) can only display specific message types.
 However, Foxglove provides Protobuf `.proto` definition files for those messages, see [here](https://github.com/foxglove/schemas/tree/main/schemas/proto/foxglove).
 
+### Blacklist
+
+Use the `blacklist.json` file to blacklist topic names from beeing forwarded.
+Add the topic names as a list. For example:
+```json
+[
+  "foxglove_rm_road_bev",
+  "foxglove_rm_lane_bev"
+]
+```
+
 
 ## Behind the scenes
 
