@@ -21,7 +21,8 @@ However, Foxglove provides Protobuf `.proto` definition files for those messages
 
 ### Blacklist
 
-Use the `blacklist.json` file to blacklist topic names from beeing forwarded.
+Use the `--blacklist` argument to specify a json file to blacklist topic names from beeing forwarded.
+Default is `blacklist.json` file.
 Add the topic names as a list. For example:
 ```json
 [
@@ -29,7 +30,6 @@ Add the topic names as a list. For example:
   "foxglove_rm_lane_bev"
 ]
 ```
-
 
 ## Behind the scenes
 
