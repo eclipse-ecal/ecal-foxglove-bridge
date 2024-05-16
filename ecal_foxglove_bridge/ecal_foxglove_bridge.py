@@ -79,9 +79,10 @@ class MonitoringListener(ABC):
 class Monitoring(object):
     topics : set[MyChannelWithoutId]
 
-    def __init__(self):
+    def __init__(self, blacklist: set):
         self.listener = None
         self.topics = set()
+        self.blacklist = blacklist
 
     def set_listener(self, listener : MonitoringListener):
         self.listener = listener
@@ -113,6 +114,8 @@ class Monitoring(object):
 
         for topic in topics:
             # only filter topics which are publishers, published by a different proces
+            if topic['tname'] in self.blacklist:
+                continue
             if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
                 current_topic = {}
                 current_topic["topic"] = topic["tname"]
@@ -192,21 +195,17 @@ class ConnectionHandler(MonitoringListener):
     id_channel_mapping: dict[ChannelId, str]
     server: FoxgloveServer
 
-    def __init__(self, server: FoxgloveServer, queue: asyncio.Queue[ServerDatum], blacklist: list):
+    def __init__(self, server: FoxgloveServer, queue: asyncio.Queue[ServerDatum]):
         self.topic_subscriptions = {}
         self.id_channel_mapping = {}
         self.server = server
         self.queue = queue
-        self.blacklist = blacklist
 
     def get_subscriber_by_id(self, id: ChannelId):
         return self.topic_subscriptions[self.id_channel_mapping[id]]
 
     async def on_new_topics(self, new_topics: set[MyChannelWithoutId]):
         for topic in new_topics:
-            if topic.topic in self.blacklist:
-                logger.info(f'Don\'t add "{topic.topic}" because it is in the blacklist')
-                continue
             channel_without_id = ChannelWithoutId(**topic._asdict())
             id = await self.server.add_channel(
                 channel_without_id
@@ -303,10 +302,10 @@ async def execute(args):
     queue: asyncio.Queue[ServerDatum] = asyncio.Queue(maxsize = 10)
     
     async with FoxgloveServer("0.0.0.0", 8765, "example server", logger=logger, capabilities=["clientPublish"], supported_encodings=["json"]) as server:
-        connection_handler = ConnectionHandler(server, queue, blacklist)
+        connection_handler = ConnectionHandler(server, queue)
         server.set_listener(Listener(connection_handler))
 
-        monitoring = Monitoring()
+        monitoring = Monitoring(blacklist)
         monitoring.set_listener(connection_handler)
         asyncio.create_task(monitoring.monitoring())
         
@@ -327,15 +326,15 @@ def parse_arguments():
     return args
 
 
-def readBlacklist(filename: str) -> list:
+def readBlacklist(filename: str) -> set:
     try:
         f = open(filename, 'r')
     except FileNotFoundError:
         logger.warning(f'{filename} file not found. No blacklist.')
-        return []
+        return set()
     else:
         data = json.load(f)
-        return data
+        return set(data)
 
 
 if __name__ == "__main__":
