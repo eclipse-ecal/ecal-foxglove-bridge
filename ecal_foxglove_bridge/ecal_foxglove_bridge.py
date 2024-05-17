@@ -293,7 +293,7 @@ async def execute(args):
     ecal_core.initialize(sys.argv, "eCAL WS Gateway")
     ecal_core.mon_initialize()
 
-    blacklist = readBlacklist(args.blacklist)
+    blacklist = readBlacklist(args.blacklist_file)
     
     # sleep 1 second so monitoring info will be available
     await asyncio.sleep(1)
@@ -320,7 +320,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
     parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
     parser.add_argument('--version', action='version', version=version_information())
-    parser.add_argument('--blacklist', '-bl', help='Path to the blacklist json file.', type=str, required=False)
+    parser.add_argument('--blacklist', help='Path to the blacklist json file.', type=str, required=False, dest='blacklist_file')
     args = parser.parse_args()     
     return args
 
