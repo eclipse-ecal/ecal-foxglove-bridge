@@ -334,10 +334,13 @@ def readBlacklist(filename: str | None) -> set:
     except FileNotFoundError:
         logger.error(f'{filename} file not found. No blacklist.')
         exit(1)
-    else:
+    try:
         data = json.load(f)
-        logger.info(f'Blacklist: {data}')
-        return set(data)
+    except json.JSONDecodeError as err:
+        logger.error(f'Error decoding json file. {err}')
+        exit(2)
+    logger.info(f'Blacklist: {data}')
+    return set(data)
 
 
 if __name__ == "__main__":
