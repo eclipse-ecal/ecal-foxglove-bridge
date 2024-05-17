@@ -13,6 +13,7 @@ import os
 import platform
 import sys
 import time
+import json
 from typing import TYPE_CHECKING, Type, NamedTuple
 
 from foxglove_websocket import run_cancellable
@@ -78,9 +79,10 @@ class MonitoringListener(ABC):
 class Monitoring(object):
     topics : set[MyChannelWithoutId]
 
-    def __init__(self):
+    def __init__(self, blacklist: set):
         self.listener = None
         self.topics = set()
+        self.blacklist = blacklist
 
     def set_listener(self, listener : MonitoringListener):
         self.listener = listener
@@ -112,6 +114,8 @@ class Monitoring(object):
 
         for topic in topics:
             # only filter topics which are publishers, published by a different proces
+            if topic['tname'] in self.blacklist:
+                continue
             if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
                 current_topic = {}
                 current_topic["topic"] = topic["tname"]
@@ -288,6 +292,8 @@ def main():
 async def execute(args):
     ecal_core.initialize(sys.argv, "eCAL WS Gateway")
     ecal_core.mon_initialize()
+
+    blacklist = readBlacklist(args.blacklist_file)
     
     # sleep 1 second so monitoring info will be available
     await asyncio.sleep(1)
@@ -298,7 +304,7 @@ async def execute(args):
         connection_handler = ConnectionHandler(server, queue)
         server.set_listener(Listener(connection_handler))
 
-        monitoring = Monitoring()
+        monitoring = Monitoring(blacklist)
         monitoring.set_listener(connection_handler)
         asyncio.create_task(monitoring.monitoring())
         
@@ -314,8 +320,28 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
     parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
     parser.add_argument('--version', action='version', version=version_information())
+    parser.add_argument('--blacklist', help='Path to the blacklist json file.', type=str, required=False, dest='blacklist_file')
     args = parser.parse_args()     
     return args
+
+
+def readBlacklist(filename: str | None) -> set:
+    if not filename:
+        logger.info('No blacklist file specified')
+        return set()
+    try:
+        f = open(filename, 'r')
+    except FileNotFoundError:
+        logger.error(f'{filename} file not found. No blacklist.')
+        exit(1)
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as err:
+        logger.error(f'Error decoding json file. {err}')
+        exit(2)
+    logger.info(f'Blacklist: {data}')
+    return set(data)
+
 
 if __name__ == "__main__":
     main()
