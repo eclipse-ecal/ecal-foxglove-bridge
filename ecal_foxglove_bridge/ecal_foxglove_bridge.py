@@ -27,6 +27,11 @@ logger = logging.getLogger("FoxgloveServer")
 ecal_foxglove_encoding_mapping = {"proto": "protobuf", "base": "json"}
 foxglove_ecal_encoding_mapping = dict(zip(ecal_foxglove_encoding_mapping.values(), ecal_foxglove_encoding_mapping.keys()))
 
+class eCALAPI(Enum):
+    ECAL_5 = 1
+    ECAL_6 = 2
+    ECAL_6_NB = 3
+
 def get_foxglove_encoding(ecal_encoding : str):
     try:
         return ecal_foxglove_encoding_mapping[ecal_encoding]
@@ -72,11 +77,9 @@ class MonitoringListener(ABC):
         ...
 
 
-
-
 # This class is handling the ecal monitoring. 
 # It evaluates the messages cyclicly and notifies on added / removed topics
-class Monitoring(object):
+class MonitoringeCAL5(object):
     topics : set[MyChannelWithoutId]
 
     def __init__(self, blacklist: set):
@@ -130,6 +133,57 @@ class Monitoring(object):
                 current_topics.add(MyChannelWithoutId(**current_topic))
 
         return current_topics
+
+class MonitoringeCAL6(object):
+    topics : set[MyChannelWithoutId]
+
+    def __init__(self, blacklist: set):
+        self.listener = None
+        self.topics = set()
+        self.blacklist = blacklist
+
+    def set_listener(self, listener : MonitoringListener):
+        self.listener = listener
+
+    async def monitoring(self):
+        while ecal_core.ok():
+            #logger.info("Monitoring...")
+            current_topics = await self.get_topics_from_monitoring()
+            new_topics = current_topics - self.topics
+            removed_topics = self.topics - current_topics
+
+            self.topics = current_topics
+
+            if self.listener:
+                if removed_topics:
+                    await self.listener.on_removed_topics(removed_topics)
+                if new_topics:
+                    await self.listener.on_new_topics(new_topics)
+
+            await asyncio.sleep(1)
+
+    async def get_topics_from_monitoring(self):
+        current_topics = set()
+        try:
+            topics = ecal_core.mon_monitoring()[1]['topics']
+        except Exception: # Catch no monitoring information
+            logger.warning("Cannot parse monitoring info")
+            return current_topics
+
+        for topic in topics:
+            # only filter topics which are publishers, published by a different proces
+            if topic['tname'] in self.blacklist:
+                continue
+            if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
+                current_topic = {}
+                current_topic["topic"] = topic["tname"]
+                current_topic["encoding"] = get_foxglove_encoding(ecal_encoding=topic["tdatatype_encoding"])
+                current_topic["schemaName"] = topic["tdatatype_name"]
+                current_topic["schema"] = base64.b64encode(topic["tdatatype_descriptor"]).decode("ascii")
+                current_topics.add(MyChannelWithoutId(**current_topic))
+
+        return current_topics
+
         
 class TimeSource(Enum):
     SEND_TIMESTAMP = 1
@@ -290,8 +344,7 @@ def main():
     run_cancellable(execute(args)) 
 
 async def execute(args):
-    ecal_core.initialize(sys.argv, "eCAL WS Gateway")
-    ecal_core.mon_initialize()
+    ecal_core.initialize("eCAL WS Gateway", ecal_core.INIT_ALL)
 
     blacklist = readBlacklist(args.blacklist_file)
     
@@ -304,7 +357,7 @@ async def execute(args):
         connection_handler = ConnectionHandler(server, queue)
         server.set_listener(Listener(connection_handler))
 
-        monitoring = Monitoring(blacklist)
+        monitoring = MonitoringeCAL6(blacklist)
         monitoring.set_listener(connection_handler)
         asyncio.create_task(monitoring.monitoring())
         
