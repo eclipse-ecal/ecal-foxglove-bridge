@@ -1,6 +1,6 @@
 param(
     $eCALVersion = '5.11.3', #
-    [ValidateSet('3.8', '3.9', '3.10', '3.11')]
+    [ValidateSet('3.8', '3.9', '3.10', '3.11', '3.12', '3.13')]
     [string]$PythonVersion = '3.11'  # 3.8, 3.9, 3.10, 3.11
 )
 

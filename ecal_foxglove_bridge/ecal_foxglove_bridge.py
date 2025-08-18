@@ -14,7 +14,28 @@ import platform
 import sys
 import time
 import json
-from typing import TYPE_CHECKING, Type, NamedTuple
+import typing
+
+from importlib.metadata import version as importlib_version
+from packaging import version as packaging_version
+
+ecal_version = packaging_version.parse(importlib_version("ecal"))
+
+if ecal_version.major == 5:
+    from .monitoring_ecal5 import Monitoring
+elif ecal_version.major == 6:
+    from .monitoring_ecal6 import Monitoring    
+else:
+    raise ImportError(f"Unsupported eCAL version {ecal_version}. Supported versions are 5.x and 6.x.")
+
+from monitoring import eCALChannel
+
+from typing import NamedTuple
+
+class ServerDatum(NamedTuple):
+    id: ChannelId
+    timestamp: int
+    msg: bytes
 
 from foxglove_websocket import run_cancellable
 from foxglove_websocket.server import FoxgloveServer, FoxgloveServerListener
@@ -22,15 +43,36 @@ from foxglove_websocket.types import ChannelId, ChannelWithoutId, ClientChannel,
 
 import ecal.core.core as ecal_core
 
+
 logger = logging.getLogger("FoxgloveServer")
 
 ecal_foxglove_encoding_mapping = {"proto": "protobuf", "base": "json"}
 foxglove_ecal_encoding_mapping = dict(zip(ecal_foxglove_encoding_mapping.values(), ecal_foxglove_encoding_mapping.keys()))
 
-class eCALAPI(Enum):
-    ECAL_5 = 1
-    ECAL_6 = 2
-    ECAL_6_NB = 3
+
+class Blacklist():
+    def __init__(self, blacklist: set[str]):
+        self.blacklist = blacklist
+
+    def is_blacklisted(self, topic_name: str) -> bool:
+        return topic_name in self.blacklist
+    
+def read_blacklist(filename: str | None) -> Blacklist:
+    if not filename:
+        logger.info('No blacklist file specified')
+        return Blacklist(set())
+    try:
+        f = open(filename, 'r')
+    except FileNotFoundError:
+        logger.error(f'{filename} file not found. No blacklist.')
+        exit(1)
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as err:
+        logger.error(f'Error decoding json file. {err}')
+        exit(2)
+    logger.info(f'Blacklist: {data}')
+    return Blacklist(set(data))
 
 def get_foxglove_encoding(ecal_encoding : str):
     try:
@@ -43,199 +85,61 @@ def get_ecal_encoding(foxglove_encoding : str):
         return foxglove_ecal_encoding_mapping[foxglove_encoding]
     except KeyError:
         return ""
-
-def is_my_own_topic(topic):
-    my_host = platform.node()
-    my_pid = os.getpid()
-    return my_pid == topic['pid'] and my_host == topic['hname']
-
-
-class MyChannelWithoutId(NamedTuple):
-    topic: str
-    encoding: str
-    schemaName: str
-    schema: str
-
-class ServerDatum(NamedTuple):
-    id: ChannelId
-    timestamp: int
-    msg: bytes
-
-class MonitoringListener(ABC):
-    @abstractmethod
-    async def on_new_topics(self, new_topics : set[ChannelWithoutId]):
-        """
-        Called when there are new topics in the monitoring
-        """
-        ...
-
-    @abstractmethod
-    async def on_removed_topics(self, removed_topics : set[MyChannelWithoutId]):
-        """
-        Called when topics are no longer present in the monitoring
-        """
-        ...
-
-
-# This class is handling the ecal monitoring. 
-# It evaluates the messages cyclicly and notifies on added / removed topics
-class MonitoringeCAL5(object):
-    topics : set[MyChannelWithoutId]
-
-    def __init__(self, blacklist: set):
-        self.listener = None
-        self.topics = set()
-        self.blacklist = blacklist
-
-    def set_listener(self, listener : MonitoringListener):
-        self.listener = listener
-
-    async def monitoring(self):
-        while ecal_core.ok():
-            #logger.info("Monitoring...")
-            current_topics = await self.get_topics_from_monitoring()
-            new_topics = current_topics - self.topics
-            removed_topics = self.topics - current_topics
-
-            self.topics = current_topics
-
-            if self.listener:
-                if removed_topics:
-                    await self.listener.on_removed_topics(removed_topics)
-                if new_topics:
-                    await self.listener.on_new_topics(new_topics)
-
-            await asyncio.sleep(1)
-
-    async def get_topics_from_monitoring(self):
-        current_topics = set()
-        try:
-            topics = ecal_core.mon_monitoring()[1]['topics']
-        except Exception: # Catch no monitoring information
-            logger.warning("Cannot parse monitoring info")
-            return current_topics
-
-        for topic in topics:
-            # only filter topics which are publishers, published by a different proces
-            if topic['tname'] in self.blacklist:
-                continue
-            if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
-                current_topic = {}
-                current_topic["topic"] = topic["tname"]
-                try:
-                    encoding, topic_type = topic["ttype"].split(":")
-                except Exception:
-                    encoding = ""
-                    topic_type = ""
-                current_topic["encoding"] = get_foxglove_encoding(ecal_encoding=encoding)
-                current_topic["schemaName"] = topic_type
-                current_topic["schema"] = base64.b64encode(topic["tdesc"]).decode("ascii")
-                current_topics.add(MyChannelWithoutId(**current_topic))
-
-        return current_topics
-
-class MonitoringeCAL6(object):
-    topics : set[MyChannelWithoutId]
-
-    def __init__(self, blacklist: set):
-        self.listener = None
-        self.topics = set()
-        self.blacklist = blacklist
-
-    def set_listener(self, listener : MonitoringListener):
-        self.listener = listener
-
-    async def monitoring(self):
-        while ecal_core.ok():
-            #logger.info("Monitoring...")
-            current_topics = await self.get_topics_from_monitoring()
-            new_topics = current_topics - self.topics
-            removed_topics = self.topics - current_topics
-
-            self.topics = current_topics
-
-            if self.listener:
-                if removed_topics:
-                    await self.listener.on_removed_topics(removed_topics)
-                if new_topics:
-                    await self.listener.on_new_topics(new_topics)
-
-            await asyncio.sleep(1)
-
-    async def get_topics_from_monitoring(self):
-        current_topics = set()
-        try:
-            topics = ecal_core.mon_monitoring()[1]['topics']
-        except Exception: # Catch no monitoring information
-            logger.warning("Cannot parse monitoring info")
-            return current_topics
-
-        for topic in topics:
-            # only filter topics which are publishers, published by a different proces
-            if topic['tname'] in self.blacklist:
-                continue
-            if topic['direction'] == 'publisher' and not is_my_own_topic(topic):
-                current_topic = {}
-                current_topic["topic"] = topic["tname"]
-                current_topic["encoding"] = get_foxglove_encoding(ecal_encoding=topic["tdatatype_encoding"])
-                current_topic["schemaName"] = topic["tdatatype_name"]
-                current_topic["schema"] = base64.b64encode(topic["tdatatype_descriptor"]).decode("ascii")
-                current_topics.add(MyChannelWithoutId(**current_topic))
-
-        return current_topics
-
         
-class TimeSource(Enum):
-    SEND_TIMESTAMP = 1
-    LOCAL_TIME = 2
 
+class MessageQueue:
+    _queue: asyncio.Queue[ServerDatum]
+    _messages_dropped: int = 0
 
-messages_dropped = 0
+    def __init__(self, maxsize: int = 10):
+        self._queue = asyncio.Queue(maxsize=maxsize)
 
+    async def submit(self, item: ServerDatum):
+        try:
+            self._queue.put_nowait(item)
+        except asyncio.QueueFull:
+            self._messages_dropped += 1
+            logger.info("Dropping message of channel with id {}. Total messages dropped: {}".format(item.id, self._messages_dropped))
+        except Exception as e:
+            print("Caught exception in callback {}".format(e))   
 
-async def submit_to_queue(queue, id, topic_name, msg, send_time):
-   try:
-       timestamp = time.time_ns()
-       
-       datum = ServerDatum(id=id, timestamp = timestamp, msg = msg)
-       queue.put_nowait(datum)
-   except asyncio.QueueFull:
-       global messages_dropped
-       global logger
-       messages_dropped = messages_dropped + 1
-       logger.info("Dropping message of channel {}. Total messages dropped: {}".format(topic_name, messages_dropped))        
-   except Exception as e:
-       print("Caught exception in callback {}".format(e))   
-    
+    async def get(self):
+        return await self._queue.get()
+
 
 # This class handles each available Topic
 # It contains an ecal subscriber, and will forward messages to the server.
 class TopicSubscriber(object):
     channel_id : ChannelId
-    info : MyChannelWithoutId
+    info : eCALChannel
     subscriber : ecal_core.subscriber
-    server : FoxgloveServer
-    
-    def __init__(self, id : ChannelId, info : MyChannelWithoutId, queue: asyncio.Queue[ServerDatum],  time_source : TimeSource = TimeSource.LOCAL_TIME):
+
+    def __init__(self, id : ChannelId, info : eCALChannel, data_callback: typing.Callable[[ServerDatum], None]):
         self.id = id
         self.info = info
         self.subscriber = None
-        self.event_loop = asyncio.get_event_loop()
-        self.queue = queue
-        self.time_source = time_source
+        self.data_callback = data_callback
 
     @property
     def is_subscribed(self):
         return self.subscriber is not None
 
-    def callback(self, topic_name, msg, send_time):
-        coroutine = submit_to_queue(self.queue, self.id, topic_name, msg, send_time)
-        # Submit the coroutine to a given loop
-        future = asyncio.run_coroutine_threadsafe(coroutine, self.event_loop)
-    
     def subscribe(self):
+        data_callback = self.data_callback
+        event_loop = asyncio.get_event_loop()
+
+        def callback(topic_name, msg, send_time):
+            asyncio.run_coroutine_threadsafe(
+                data_callback(ServerDatum(
+                    id=self.id,
+                    msg=msg,
+                    timestamp=time.time_ns()
+                )),
+                event_loop
+            )
+
         self.subscriber = ecal_core.subscriber(self.info.topic)
-        self.subscriber.set_callback(self.callback)
+        self.subscriber.set_callback(callback)
         
     def unsubscribe(self):
         self.subscriber.destroy()
@@ -351,15 +255,14 @@ async def execute(args):
     # sleep 1 second so monitoring info will be available
     await asyncio.sleep(1)
 
-    queue: asyncio.Queue[ServerDatum] = asyncio.Queue(maxsize = 10)
+    message_queue = MessageQueue(maxsize=args.queue_size)
     
     async with FoxgloveServer("0.0.0.0", 8765, "example server", logger=logger, capabilities=["clientPublish"], supported_encodings=["json"]) as server:
         connection_handler = ConnectionHandler(server, queue)
         server.set_listener(Listener(connection_handler))
 
-        monitoring = MonitoringeCAL6(blacklist)
-        monitoring.set_listener(connection_handler)
-        asyncio.create_task(monitoring.monitoring())
+        monitoring = Monitoring(blacklist)
+        asyncio.create_task(monitoring.do_monitor(connection_handler))
         
         asyncio.create_task(handle_messages( queue, server))
 
@@ -378,22 +281,7 @@ def parse_arguments():
     return args
 
 
-def readBlacklist(filename: str | None) -> set:
-    if not filename:
-        logger.info('No blacklist file specified')
-        return set()
-    try:
-        f = open(filename, 'r')
-    except FileNotFoundError:
-        logger.error(f'{filename} file not found. No blacklist.')
-        exit(1)
-    try:
-        data = json.load(f)
-    except json.JSONDecodeError as err:
-        logger.error(f'Error decoding json file. {err}')
-        exit(2)
-    logger.info(f'Blacklist: {data}')
-    return set(data)
+
 
 
 if __name__ == "__main__":
