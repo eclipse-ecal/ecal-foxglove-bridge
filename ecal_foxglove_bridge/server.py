@@ -4,7 +4,7 @@
 import typing
 from .bridge_types import Topic, Data
 
-class Listener(typing.Protocol):
+class ServerListener(typing.Protocol):
         
     async def on_subscribe(self, topic: Topic):
         ...
@@ -12,11 +12,36 @@ class Listener(typing.Protocol):
     async def on_unsubscribe(self, topic: Topic):
         ...
 
-    async def on_client_advertise(self, topic: Topic):
+    async def on_publisher_advertise(self, topic: Topic):
         ...
 
-    async def on_client_unadvertise(self, topic: Topic):
+    async def on_publisher_unadvertise(self, topic: Topic):
         ...
 
-    async def on_client_message(self, data: Data):
+    async def on_publisher_message(self, data: Data):
         ...
+
+class ServerArguments(typing.NamedTuple):
+    name : str
+    ip_address: str
+    port: int
+
+class Server(typing.Protocol):
+    def __init__(self, server_arguments: ServerArguments):
+        ...
+
+    async def __aenter__(self) -> "Server":
+        ...
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool | None:
+        ...
+
+    async def add_publisher(self, topic: Topic)-> None:
+        ...
+
+    async def remove_publisher(self, topic: Topic)-> None:
+        ...
+
+    async def publish(self, data: Data) -> None:
+        ...
+        

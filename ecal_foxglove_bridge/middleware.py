@@ -2,19 +2,28 @@
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
 import typing
-from typing import NamedTuple
 
 from .bridge_types import MessageEncoding, Topic, Data
 
+class MiddlewareContext(typing.ContextManager["MiddlewareContext"], typing.Protocol):
+    """ Context manager for middleware initialization and finalization. """
+
+    def __init__(self, message: str) -> None:
+        """
+        Initialize the middleware context with an optional message.
+        """
+        ...
+        
+    ...
 
 class MonitoringListener(typing.Protocol):
-    async def on_new_topics(self, new_topic : Topic):
+    async def on_new_topic(self, new_topic : Topic):
         """
         Called when there are new topics in the monitoring
         """
         ...
 
-    async def on_removed_topics(self, removed_topic : Topic):
+    async def on_removed_topic(self, removed_topic : Topic):
         """
         Called when topics are no longer present in the monitoring
         """
@@ -29,7 +38,13 @@ class Monitoring(typing.Protocol):
 
 
 class Publisher(typing.Protocol):
-    async def publish(self, data: Data):
+    def __init__(self, info : Topic):
+        """
+        Initialize the publisher with topic information.
+        """
+        ...
+
+    async def publish(self, message: bytes):
         """
         Publish data to the topic.
         """

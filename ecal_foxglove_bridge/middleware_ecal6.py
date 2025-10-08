@@ -9,11 +9,14 @@ import typing
 import time
 
 import ecal.nanobind_core as ecal_core
+from ecal.msg.string.core import Publisher as StringPublisher
 
 from .middleware import MonitoringListener
 from .bridge_types import MessageEncoding, Topic, Data
 
 logger = logging.getLogger("FoxgloveServer - eCAL 6")
+
+MIDDLEWARE_VERSION = f"eCAL {ecal_core.get_version_string()}"
 
 class TopicHelper:
     """ Helper class to check if a topic belongs to the current process. """
@@ -48,6 +51,20 @@ class TopicHelper:
             schema=topic_info.descriptor
         )
 
+
+class MiddlewareContext():
+    """ Context manager for eCAL initialization and finalization. """
+    def __init__(self, message: str):
+        self.message = message
+
+    def __enter__(self, ) -> "MiddlewareContext":
+        ecal_core.initialize(self.message, ecal_core.init.ALL)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        ecal_core.finalize()
+
+
 class Monitoring(object):
     topics : set[Topic] = set()
     topic_helper = TopicHelper()
@@ -63,9 +80,11 @@ class Monitoring(object):
             self.topics = current_topics
 
             if removed_topics:
-                await listener.on_removed_topics(removed_topics)
+                for removed_topic in removed_topics:
+                    await listener.on_removed_topic(removed_topic)
             if new_topics:
-                await listener.on_new_topics(new_topics)
+                for new_topic in new_topics:
+                    await listener.on_new_topic(new_topic)
 
             await asyncio.sleep(1)
 
@@ -123,9 +142,18 @@ class Subscriber(object):
                 event_loop
             )
 
-        self.subscriber = ecal_core.subscriber(self.info.topic)
-        self.subscriber.set_callback(callback)
+        self.subscriber = ecal_core.Subscriber(self.topic.topic_name)
+        self.subscriber.set_receive_callback(callback)
         
     def unsubscribe(self):
         self.subscriber.destroy()
         self.subscriber = None
+
+class Publisher(object):
+    publisher : ecal_core.Publisher
+
+    def __init__(self, info : Topic):
+        self.publisher = StringPublisher(info.topic_name)
+
+    async def publish(self, message: bytes):
+        self.publisher.send(message)        

@@ -19,3 +19,11 @@ class Data(NamedTuple):
     topic: Topic
     timestamp: int
     msg: bytes
+
+class Action(Enum):
+    SUBSCRIBE = "subscribe"
+    UNSUBSCRIBE = "unsubscribe"   
+
+class Command(NamedTuple):
+    action: Action
+    topic: Topic     

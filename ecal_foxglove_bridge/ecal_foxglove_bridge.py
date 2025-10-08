@@ -3,52 +3,19 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import asyncio
 import argparse
-import base64
-from enum import Enum
 import logging
-import os
-import platform
-import sys
-import time
 import json
-import typing
 
-from importlib.metadata import version as importlib_version
-from packaging import version as packaging_version
-
-ecal_version = packaging_version.parse(importlib_version("ecal"))
-
-if ecal_version.major == 5:
-    from .monitoring_ecal5 import Monitoring
-elif ecal_version.major == 6:
-    from .monitoring_ecal6 import Monitoring    
-else:
-    raise ImportError(f"Unsupported eCAL version {ecal_version}. Supported versions are 5.x and 6.x.")
-
-from monitoring import eCALChannel
-
-from typing import NamedTuple
-
-class ServerDatum(NamedTuple):
-    id: ChannelId
-    timestamp: int
-    msg: bytes
-
-from foxglove_websocket import run_cancellable
-from foxglove_websocket.server import FoxgloveServer, FoxgloveServerListener
-from foxglove_websocket.types import ChannelId, ChannelWithoutId, ClientChannel, ClientChannelId
-
-import ecal.core.core as ecal_core
-
+from .bridge_types import Topic, Data, Command, Action
+from .middleware_implementation import *
+from .server_implementation import *
 
 logger = logging.getLogger("FoxgloveServer")
 
-ecal_foxglove_encoding_mapping = {"proto": "protobuf", "base": "json"}
-foxglove_ecal_encoding_mapping = dict(zip(ecal_foxglove_encoding_mapping.values(), ecal_foxglove_encoding_mapping.keys()))
-
+# We don't want any foxglove imports here. This is an exception, but we will provide a similar function in the future
+from foxglove_websocket import run_cancellable
 
 class Blacklist():
     def __init__(self, blacklist: set[str]):
@@ -73,28 +40,16 @@ def read_blacklist(filename: str | None) -> Blacklist:
         exit(2)
     logger.info(f'Blacklist: {data}')
     return Blacklist(set(data))
-
-def get_foxglove_encoding(ecal_encoding : str):
-    try:
-        return ecal_foxglove_encoding_mapping[ecal_encoding]
-    except KeyError:
-        return ""
-
-def get_ecal_encoding(foxglove_encoding : str):
-    try:
-        return foxglove_ecal_encoding_mapping[foxglove_encoding]
-    except KeyError:
-        return ""
-        
+    
 
 class MessageQueue:
-    _queue: asyncio.Queue[ServerDatum]
+    _queue: asyncio.Queue[Data]
     _messages_dropped: int = 0
 
     def __init__(self, maxsize: int = 10):
         self._queue = asyncio.Queue(maxsize=maxsize)
 
-    async def submit(self, item: ServerDatum):
+    async def submit(self, item: Data):
         try:
             self._queue.put_nowait(item)
         except asyncio.QueueFull:
@@ -106,183 +61,139 @@ class MessageQueue:
     async def get(self):
         return await self._queue.get()
 
+class CommandQueue:
+    _queue: asyncio.Queue[Command]
 
-# This class handles each available Topic
-# It contains an ecal subscriber, and will forward messages to the server.
-class TopicSubscriber(object):
-    channel_id : ChannelId
-    info : eCALChannel
-    subscriber : ecal_core.subscriber
+    def __init__(self, maxsize: int = 1000):
+        self._queue = asyncio.Queue(maxsize=maxsize)
 
-    def __init__(self, id : ChannelId, info : eCALChannel, data_callback: typing.Callable[[ServerDatum], None]):
-        self.id = id
-        self.info = info
-        self.subscriber = None
+    async def submit(self, command: Command):
+        await self._queue.put(command)
+
+    async def get(self) -> Command:
+        return await self._queue.get()
+
+class ConnectionHandler(MonitoringListener, ServerListener):
+    def __init__(self, message_queue: MessageQueue, command_queue: CommandQueue, blacklist: Blacklist):
+        self.message_queue = message_queue
+        self.command_queue = command_queue
+        self.blacklist = blacklist
+        self.subscriber_handler = SubscriberHandler(self.on_message)
+        self.publisher_handler = PublisherHandler()
+
+    async def on_message(self, data: Data):
+        await self.message_queue.submit(data)
+
+    #functions from MonitoringListener
+    async def on_new_topic(self, new_topic : Topic):
+        if (not self.blacklist.is_blacklisted(new_topic.topic_name)):
+            await self.command_queue.submit(Command(Action.SUBSCRIBE, new_topic))
+        else:
+            logger.info(f"Topic {new_topic.topic_name} is blacklisted, not subscribing.")
+
+    async def on_removed_topic(self, removed_topic : Topic):
+        if (not self.blacklist.is_blacklisted(removed_topic.topic_name)):
+            await self.command_queue.submit(Command(Action.UNSUBSCRIBE, removed_topic))
+
+    # functions from ServerListener
+    async def on_subscribe(self, topic: Topic):
+        self.subscriber_handler.add_subscriber(topic)
+
+    async def on_unsubscribe(self, topic: Topic):
+        self.subscriber_handler.remove_subscriber(topic)
+
+    async def on_publisher_advertise(self, topic: Topic):
+        self.publisher_handler.add_publisher(topic)
+
+    async def on_publisher_unadvertise(self, topic: Topic):
+        self.publisher_handler.remove_publisher(topic)
+
+    async def on_publisher_message(self, data: Data):
+        self.publisher_handler.publish(data)
+
+
+class SubscriberHandler(object):
+    subscribers: dict[Topic, Subscriber] = {}
+
+    def __init__(self, data_callback):
         self.data_callback = data_callback
 
-    @property
-    def is_subscribed(self):
-        return self.subscriber is not None
+    def add_subscriber(self, topic: Topic):
+        self.subscribers[topic] = Subscriber(topic, self.data_callback)
+        self.subscribers[topic].subscribe()
 
-    def subscribe(self):
-        data_callback = self.data_callback
-        event_loop = asyncio.get_event_loop()
-
-        def callback(topic_name, msg, send_time):
-            asyncio.run_coroutine_threadsafe(
-                data_callback(ServerDatum(
-                    id=self.id,
-                    msg=msg,
-                    timestamp=time.time_ns()
-                )),
-                event_loop
-            )
-
-        self.subscriber = ecal_core.subscriber(self.info.topic)
-        self.subscriber.set_callback(callback)
-        
-    def unsubscribe(self):
-        self.subscriber.destroy()
-        self.subscriber = None
-
-
-# This class handles all connections.
-# It advertises new topics to the server, and removes the ones that are no longer present in the monitoring
-class ConnectionHandler(MonitoringListener):
-    topic_subscriptions: dict[str, TopicSubscriber]
-    id_channel_mapping: dict[ChannelId, str]
-    server: FoxgloveServer
-
-    def __init__(self, server: FoxgloveServer, queue: asyncio.Queue[ServerDatum]):
-        self.topic_subscriptions = {}
-        self.id_channel_mapping = {}
-        self.server = server
-        self.queue = queue
-
-    def get_subscriber_by_id(self, id: ChannelId):
-        return self.topic_subscriptions[self.id_channel_mapping[id]]
-
-    async def on_new_topics(self, new_topics: set[MyChannelWithoutId]):
-        for topic in new_topics:
-            channel_without_id = ChannelWithoutId(**topic._asdict())
-            id = await self.server.add_channel(
-                channel_without_id
-            )
-            self.topic_subscriptions[topic.topic] = TopicSubscriber(id, topic, self.queue)
-            self.id_channel_mapping[id] = topic.topic
-            logger.info("Added topic {} with id {}".format(topic.topic, id))
-
-    async def on_removed_topics(self, removed_topics: set[MyChannelWithoutId]):
-        for topic in removed_topics:
-            topic_name = topic.topic
-            removed_subscriber = self.topic_subscriptions[topic_name]
-            logger.info("Removing topic {} with id {}".format(topic.topic, removed_subscriber.id))
-            await self.server.remove_channel(
-               removed_subscriber.id
-            )
-            if removed_subscriber.is_subscribed:
-                removed_subscriber.unsubscribe()
-            self.topic_subscriptions.pop(topic_name)
-            self.id_channel_mapping.pop(removed_subscriber.id)
+    def remove_subscriber(self, topic: Topic):
+        self.subscribers[topic].unsubscribe()
+        del self.subscribers[topic]    
 
 
 class PublisherHandler(object):
-    publishers: dict[ChannelId, ecal_core.publisher]
+    publishers: dict[Topic, Publisher] = {}
 
-    def __init__(self):
-        self.publishers = {}
+    def add_publisher(self, topic: Topic):
+        self.publishers[topic] = Publisher(topic)
 
-    def add_publisher(self, channel: ClientChannel):
-        # ecal_encoding = get_ecal_encoding(foxglove_encoding=channel["encoding"])
-        # topic_type = f"{ecal_encoding}:{channel['schemaName']}"
-        topic_type = "base:std::string"
-        self.publishers[channel["id"]] = ecal_core.publisher(topic_name=channel["topic"], topic_type=topic_type)
+    def remove_publisher(self, topic: Topic):
+        self.publishers[topic].destroy()
+        del self.publishers[topic]
 
-    def remove_publisher(self, channel_id: ClientChannelId):
-        # atm we're not removing the publishers since we would recreate publishers all the time
-        self.publishers[channel_id].destroy()
-        del self.publishers[channel_id]
-        pass
-
-    def publish(self, channel_id: ClientChannelId, payload: bytes):
-        self.publishers[channel_id].send(payload)
+    def publish(self, data: Data):
+        self.publishers[data.topic].send(data.msg)
 
 
-class Listener(FoxgloveServerListener):
-    publisher_handler: PublisherHandler
-
-    def __init__(self, connection_handler : ConnectionHandler):
-        self.connection_handler = connection_handler
-        self.publisher_handler = PublisherHandler()
-
-    async def on_subscribe(self, server: FoxgloveServer, channel_id: ChannelId):
-        logger.info("Subscribing to {}".format(channel_id));
-        self.connection_handler.get_subscriber_by_id(channel_id).subscribe()
-
-    async def on_unsubscribe(self, server: FoxgloveServer, channel_id: ChannelId):
-        logger.info("Unsubscribing from {}".format(channel_id));
-        self.connection_handler.get_subscriber_by_id(channel_id).unsubscribe()
-
-    async def on_client_advertise(self, server: FoxgloveServer, channel: ClientChannel):
-        self.publisher_handler.add_publisher(channel)
-
-    async def on_client_unadvertise(self, server: FoxgloveServer, channel_id: ClientChannelId):
-        self.publisher_handler.remove_publisher(channel_id)
-
-    async def on_client_message(self, server: FoxgloveServer, channel_id: ClientChannelId, payload: bytes):
-        self.publisher_handler.publish(channel_id, payload)
-
-
-async def handle_messages(queue: asyncio.Queue[ServerDatum], server: FoxgloveServer):
+async def forward_messages(queue: asyncio.Queue[Data], server: Server):
     while True:
         data = await queue.get()
-        await server.send_message(
-            data.id,
-            data.timestamp,
-            data.msg
-        )
+        await server.publish(data)  
 
+async def forward_commands(command_queue: CommandQueue, server: Server):
+    while True:
+        command = await command_queue.get()
+        if command.action == Action.SUBSCRIBE:
+            await server.add_publisher(command.topic)
+        elif command.action == Action.UNSUBSCRIBE:
+            await server.remove_publisher(command.topic)        
 
 def main():
     args = parse_arguments()
     run_cancellable(execute(args)) 
 
 async def execute(args):
-    ecal_core.initialize("eCAL WS Gateway", ecal_core.INIT_ALL)
+    with MiddlewareContext("eCAL Foxglove Bridge"):
 
-    blacklist = readBlacklist(args.blacklist_file)
+        # sleep 1 second so monitoring info will be available
+        await asyncio.sleep(2)
+
+        blacklist = read_blacklist(args.blacklist_file)
+        message_queue = MessageQueue(maxsize=args.queue_size)
+        command_queue = CommandQueue()
     
-    # sleep 1 second so monitoring info will be available
-    await asyncio.sleep(1)
+        connection_handler = ConnectionHandler(message_queue, command_queue, blacklist)
 
-    message_queue = MessageQueue(maxsize=args.queue_size)
-    
-    async with FoxgloveServer("0.0.0.0", 8765, "example server", logger=logger, capabilities=["clientPublish"], supported_encodings=["json"]) as server:
-        connection_handler = ConnectionHandler(server, queue)
-        server.set_listener(Listener(connection_handler))
+        server_arguments = ServerArguments(
+            ip_address="0.0.0.0",
+            port=8765,
+            name="example server"
+        )
 
-        monitoring = Monitoring(blacklist)
-        asyncio.create_task(monitoring.do_monitor(connection_handler))
-        
-        asyncio.create_task(handle_messages( queue, server))
+        async with Server(server_arguments, connection_handler) as server:
+            monitoring = Monitoring()
+            asyncio.create_task(monitoring.do_monitor(connection_handler))       
+            asyncio.create_task(forward_messages(message_queue, server))
+            asyncio.create_task(forward_commands(command_queue, server))
 
-        while True:
-            await asyncio.sleep(0.5)
+            while True:
+                await asyncio.sleep(0.5)
+
 
 def version_information():
-    return '''ecal-foxglove-bridge {} using ecal: {}'''.format("0.2.0", ecal_core.getversion())
+    return '''ecal-foxglove-bridge {} using {} and {}'''.format("0.3.0", MIDDLEWARE_VERSION, SERVER_VERSION)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
     parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
     parser.add_argument('--version', action='version', version=version_information())
-    parser.add_argument('--blacklist', help='Path to the blacklist json file.', type=str, required=False, dest='blacklist_file')
+    parser.add_argument('--blacklist', help='Path to the blacklist json file, that lists topics which should not be advertised to the server.', type=str, required=False, dest='blacklist_file')
     args = parser.parse_args()     
     return args
 
-
-
-
-
-if __name__ == "__main__":
-    main()

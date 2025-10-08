@@ -15,7 +15,9 @@ from .bridge_types import MessageEncoding, Topic, Data
 
 logger = logging.getLogger("FoxgloveServer - eCAL 5")
 
-def is_my_own_topic(topic):
+MIDDLEWARE_VERSION = f"eCAL {ecal_core.getversion()}"
+
+def is_my_own_topic(topic: dict):
     my_host = platform.node()
     my_pid = os.getpid()
     return my_pid == topic['pid'] and my_host == topic['hname']
@@ -52,6 +54,19 @@ def create_topic_from_info(info: dict) -> Topic | None:
         schema=info["tdesc"]
     )
 
+class MiddlewareContext():
+    """ Context manager for eCAL initialization and finalization. """
+    def __init__(self, message: str):
+        self.message = message
+
+    def __enter__(self, ) -> "MiddlewareContext":
+        ecal_core.initialize([], self.message)
+        ecal_core.mon_initialize()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        ecal_core.finalize()
+
 class Monitoring(object):
     """ Monitoring class for eCAL 5
     This class monitors the eCAL topics and notifies the listener about new and removed topics.
@@ -72,9 +87,11 @@ class Monitoring(object):
             self.topics = current_topics
 
             if removed_topics:
-                await listener.on_removed_topics(removed_topics)
+                for removed_topic in removed_topics:
+                    await listener.on_removed_topic(removed_topic)
             if new_topics:
-                await listener.on_new_topics(new_topics)
+                for new_topic in new_topics:
+                    await listener.on_new_topic(new_topic)
 
             await asyncio.sleep(1)
 
@@ -131,3 +148,12 @@ class Subscriber(object):
     def unsubscribe(self):
         self.subscriber.destroy()
         self.subscriber = None
+
+class Publisher(object):
+    publisher : ecal_core.publisher
+
+    def __init__(self, info : Topic):
+        self.publisher = ecal_core.publisher(info.topic_name, "base:std::string")
+
+    async def publish(self, message: bytes):
+        self.publisher.send(message)
