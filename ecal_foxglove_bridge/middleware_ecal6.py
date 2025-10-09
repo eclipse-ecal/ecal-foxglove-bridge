@@ -1,4 +1,4 @@
-# Copyright (c) Continental. All rights reserved.
+# Copyright 2025 AUMOVIO and subsidiaries. All rights reserved.
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
 import asyncio

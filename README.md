@@ -6,11 +6,46 @@ This repository provides an implementation to forward arbitrary eCAL (Protobuf) 
 
 ## Installation instructions
 
-Please see [Installation Instructions](ecal_foxglove_bridge/README.md)
+For installation, you will need a recent Python version (>= 3.8).
+We recommend to setup the Bridge in an isolated Python environment.
+
+### eCAL 6 usage
+
+Install the bridge via
+
+```
+pip install ecal-foxglove-bridge[with-eclipse-ecal]
+```
+
+### eCAL 5 usage
+
+eCAL 5 is not available via pip, thus, it must be inatlled manually.
+Please download the Python wheel matching to your eCAL installation and OS from the [Github Release Page](https://github.com/eclipse-ecal/ecal/releases).
+Then install first the ecal5 wheel, and then the ecal_foxglove_bridge.
+```
+pip install /path/to/ecal5-wheel.whl
+pip install ecal-foxglove-bridge
+```
+
+### Manually building the wheel
+
+The package can also be build directly from the source code by executing
+```
+python -m build
+```
+
+The resulting .whl will be created in a dist folder and can be install manually via pip.
+
 
 ## Usage
 
-Please run Foxglove Studio, the bridge component and a set of eCAL tasks, whose outputs you would like to visualize.
+After installing all requirements, the bridge can be launched by running
+
+```
+ecal-foxglove-bridge
+```
+
+Then run Foxglove Studio and a set of eCAL tasks, whose outputs you would like to visualize.
 In Foxglove Studio, connect to a Websocket on the default port as a datasource.
 You can use any of the available panels to visualize the data.
 
@@ -46,5 +81,5 @@ It can then create eCAL subscribers for the requested data and forward it to Stu
 Especially when trying to visualize big, high frequency data, this can be problematic.
 In order not to lag behind in case of overload, the Bridge application uses an internal queue with a fixed size.
 Hence, messages might be dropped if they cannot be sent fast enough.~~
-After deactivating compression in the websocket connection as a default, the connection seems fine. Make sure to upgrade the `foxglove-websocket` Python dependenc to the newest version (>=0.1.1).
+After deactivating compression in the websocket connection as a default, the connection seems fine. Make sure to upgrade the `foxglove-websocket` Python dependency to the newest version (>=0.1.1).
 

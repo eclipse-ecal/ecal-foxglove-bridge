@@ -1,4 +1,5 @@
-# Copyright (c) Continental. All rights reserved.
+# Copyright (c) 2023 - 2025 Continental. All rights reserved.
+# Copyright 2025 AUMOVIO and subsidiaries. All rights reserved.
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
 from __future__ import annotations
@@ -175,7 +176,7 @@ async def execute(args):
 
         server_arguments = ServerArguments(
             ip_address="0.0.0.0",
-            port=8765,
+            port=args.port,
             name="example server"
         )
 
@@ -194,6 +195,7 @@ def version_information():
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Bridge application to forward data between eCAL network and Foxglove websocket connection")
+    parser.add_argument("--port", dest="port", type=int, help="Port to run the server on", default=8765)
     parser.add_argument("--queue-size", dest="queue_size", type=int, help="Size of the queue where to keep messages before sending them over the websocket connection. If the queue is full, additional incoming messages will be dropped", default=3)
     parser.add_argument('--version', action='version', version=version_information())
     parser.add_argument('--blacklist', help='Path to the blacklist json file, that lists topics which should not be advertised to the server.', type=str, required=False, dest='blacklist_file')
