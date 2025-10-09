@@ -2,10 +2,23 @@
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
 from packaging import version as packaging_version
-from importlib.metadata import version as importlib_version
+from importlib.metadata import version as importlib_version, PackageNotFoundError
 
-#TODO: need to find a compatible way to check the ecal version!
-ecal_version = packaging_version.parse(importlib_version("eclipse_ecal"))
+def get_ecal_version():
+    try:
+        # New package name (ecal >= 6)
+        return packaging_version.parse(importlib_version("eclipse_ecal"))
+    except PackageNotFoundError:
+        try:
+            # Old package name (ecal < 6)
+            return packaging_version.parse(importlib_version("ecal5"))
+        except PackageNotFoundError:
+            raise ImportError(
+                "Neither 'ecal5' (eCAL < 6) nor 'eclipse_ecal' (eCAL >= 6) is installed. "
+                "Please install one of them."
+            )
+
+ecal_version = get_ecal_version()
 
 if ecal_version.major == 5:
     from .middleware_ecal5 import MiddlewareContext, Monitoring, Publisher, Subscriber, MIDDLEWARE_VERSION

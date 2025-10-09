@@ -9,7 +9,6 @@ import typing
 import time
 
 import ecal.nanobind_core as ecal_core
-from ecal.msg.string.core import Publisher as StringPublisher
 
 from .middleware import MonitoringListener
 from .bridge_types import MessageEncoding, Topic, Data
@@ -118,17 +117,6 @@ class Subscriber(object):
     topic_helper = TopicHelper()
 
     def __init__(self, topic : Topic, data_callback: typing.Callable[[Data], None]):
-        self.topic = topic
-        self.data_callback = data_callback
-        self.subscriber = None
-
-    @property
-    def is_subscribed(self):
-        return self.subscriber is not None
-
-    def subscribe(self):
-        data_callback = self.data_callback
-        topic = self.topic
         event_loop = asyncio.get_event_loop()
 
         def callback(publisher_id : ecal_core.TopicId, datatype_info : ecal_core.DataTypeInformation, data : ecal_core.ReceiveCallbackData):
@@ -142,18 +130,28 @@ class Subscriber(object):
                 event_loop
             )
 
-        self.subscriber = ecal_core.Subscriber(self.topic.topic_name)
+        self.subscriber = ecal_core.Subscriber(topic.topic_name)
         self.subscriber.set_receive_callback(callback)
-        
-    def unsubscribe(self):
-        self.subscriber.destroy()
+
+    def close(self):
+        self.subscriber.remove_receive_callback()
+        del self.subscriber
         self.subscriber = None
 
 class Publisher(object):
     publisher : ecal_core.Publisher
 
     def __init__(self, info : Topic):
-        self.publisher = StringPublisher(info.topic_name)
+        datatype_info = ecal_core.DataTypeInformation(
+            name=info.schema_name,
+            encoding=info.encoding.value,
+            descriptor=info.schema
+        )
+        self.publisher = ecal_core.Publisher(info.topic_name, datatype_info)
 
-    async def publish(self, message: bytes):
-        self.publisher.send(message)        
+    def publish(self, message: bytes):
+        self.publisher.send(message)
+
+    def close(self):
+        del self.publisher
+        self.publisher = None

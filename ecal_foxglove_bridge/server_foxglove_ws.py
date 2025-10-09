@@ -102,11 +102,12 @@ class Listener(FoxgloveServerListener):
             logger.warning(f"Received unsubscribe for unknown channel ID: {channel_id}")
 
     async def on_client_advertise(self, server: FoxgloveServer, channel: ClientChannel):
-        print(channel)
+        logger.info(f"Advertising Server Publisher channel ID: {channel['id']}")
         self._publisher_mapping[channel["id"]] = TopicConverter.foxglove_client_channel_to_topic(channel)
         await self._listener.on_publisher_advertise(self._publisher_mapping[channel["id"]])
 
     async def on_client_unadvertise(self, server: FoxgloveServer, channel_id: ClientChannelId):
+        logger.info(f"Unadvertising Server Publisher channel ID: {channel_id}")
         removed_topic = self._publisher_mapping.pop(channel_id, None)
         if removed_topic is not None:
             await self._listener.on_publisher_unadvertise(removed_topic)
@@ -116,7 +117,7 @@ class Listener(FoxgloveServerListener):
     async def on_client_message(self, server: FoxgloveServer, channel_id: ClientChannelId, payload: bytes):
         topic = self._publisher_mapping.get(channel_id, None)
         if topic is not None:
-            self._listener.on_publisher_message(Data(
+            await self._listener.on_publisher_message(Data(
               topic=self._publisher_mapping[channel_id],
               timestamp=0,  # Timestamp is not provided in this context
               msg=payload

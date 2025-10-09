@@ -119,17 +119,6 @@ class Subscriber(object):
     subscriber : ecal_core.subscriber
 
     def __init__(self, topic : Topic, data_callback: typing.Callable[[Data], None]):
-        self.topic = topic
-        self.data_callback = data_callback
-        self.subscriber = None
-
-    @property
-    def is_subscribed(self):
-        return self.subscriber is not None
-
-    def subscribe(self):
-        data_callback = self.data_callback
-        topic = self.topic
         event_loop = asyncio.get_event_loop()
 
         def callback(topic_name, msg, send_time):
@@ -142,10 +131,10 @@ class Subscriber(object):
                 event_loop
             )
 
-        self.subscriber = ecal_core.subscriber(self.info.topic)
+        self.subscriber = ecal_core.subscriber(topic.topic_name)
         self.subscriber.set_callback(callback)
-        
-    def unsubscribe(self):
+    
+    def close(self):
         self.subscriber.destroy()
         self.subscriber = None
 
@@ -155,5 +144,9 @@ class Publisher(object):
     def __init__(self, info : Topic):
         self.publisher = ecal_core.publisher(info.topic_name, "base:std::string")
 
-    async def publish(self, message: bytes):
+    def publish(self, message: bytes):
         self.publisher.send(message)
+
+    def close(self):
+        self.publisher.destroy()
+        self.publisher = None

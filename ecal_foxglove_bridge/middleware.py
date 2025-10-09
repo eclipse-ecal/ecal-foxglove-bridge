@@ -44,11 +44,17 @@ class Publisher(typing.Protocol):
         """
         ...
 
-    async def publish(self, message: bytes):
+    def publish(self, message: bytes):
         """
         Publish data to the topic.
         """
         ...
+
+    def close(self):
+        """
+        Cleanup resources used by the publisher.
+        """
+        ...    
  
 
 class Subscriber(typing.Protocol):
@@ -58,21 +64,8 @@ class Subscriber(typing.Protocol):
         """
         ...
 
-    @property
-    def is_subscribed(self):
+    def close(self):
         """
-        Check if the subscriber is currently subscribed to the topic.
-        """
-        ...
-
-    async def subscribe(self):
-        """
-        Subscribe to a topic and call the callback with the data received.
-        """
-        ...
-    
-    async def unsubscribe(self):
-        """
-        Unsubscribe from a topic.
+        Cleanup resources used by the subscriber.
         """
         ...

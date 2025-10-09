@@ -120,11 +120,11 @@ class SubscriberHandler(object):
 
     def add_subscriber(self, topic: Topic):
         self.subscribers[topic] = Subscriber(topic, self.data_callback)
-        self.subscribers[topic].subscribe()
 
     def remove_subscriber(self, topic: Topic):
-        self.subscribers[topic].unsubscribe()
-        del self.subscribers[topic]    
+        removed_subscriber = self.subscribers.pop(topic, None)
+        if removed_subscriber is not None:
+            removed_subscriber.close()
 
 
 class PublisherHandler(object):
@@ -134,11 +134,14 @@ class PublisherHandler(object):
         self.publishers[topic] = Publisher(topic)
 
     def remove_publisher(self, topic: Topic):
-        self.publishers[topic].destroy()
-        del self.publishers[topic]
+        removed_publisher = self.publishers.pop(topic, None)
+        if removed_publisher is not None:
+            removed_publisher.close()
 
     def publish(self, data: Data):
-        self.publishers[data.topic].send(data.msg)
+        publisher = self.publishers.get(data.topic, None)
+        if publisher is not None:
+            publisher.publish(data.msg)
 
 
 async def forward_messages(queue: asyncio.Queue[Data], server: Server):
