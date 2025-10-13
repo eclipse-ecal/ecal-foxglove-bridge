@@ -32,7 +32,7 @@ def get_message_encoding(ecal_encoding: str) -> MessageEncoding:
         raise ValueError(f"Unsupported eCAL encoding: {ecal_encoding}")
 
 
-def create_topic_from_info(info: dict) -> Topic | None:
+def create_topic_from_info(info: dict) -> typing.Optional[Topic]:
     if info['direction'] == 'subscriber' or is_my_own_topic(info):
         return None  # Skip topics that are not published by this process
 

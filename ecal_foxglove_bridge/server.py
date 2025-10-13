@@ -27,13 +27,13 @@ class ServerArguments(typing.NamedTuple):
     port: int
 
 class Server(typing.Protocol):
-    def __init__(self, server_arguments: ServerArguments):
+    def __init__(self, server_arguments: ServerArguments, server_listener: ServerListener):
         ...
 
     async def __aenter__(self) -> "Server":
         ...
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool | None:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> typing.Optional[bool]:
         ...
 
     async def add_publisher(self, topic: Topic)-> None:

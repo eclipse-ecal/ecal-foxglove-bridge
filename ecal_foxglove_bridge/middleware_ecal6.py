@@ -34,7 +34,7 @@ class TopicHelper:
         else:
             raise ValueError(f"Unsupported eCAL encoding: {ecal_encoding}")
 
-    def create_topic(self, topic: ecal_core.TopicId, topic_info: ecal_core.DataTypeInformation) -> Topic | None:
+    def create_topic(self, topic: ecal_core.TopicId, topic_info: ecal_core.DataTypeInformation) -> typing.Optional[Topic]:
         if self.is_my_own_topic(topic):
             return None  # Skip topics that are not published by this process
    
@@ -113,7 +113,7 @@ class Monitoring(object):
 class Subscriber(object):
     topic : Topic
     data_callback: typing.Callable[[Data], None]
-    subscriber : ecal_core.Subscriber | None = None
+    subscriber : typing.Optional[ecal_core.Subscriber] = None
     topic_helper = TopicHelper()
 
     def __init__(self, topic : Topic, data_callback: typing.Callable[[Data], None]):

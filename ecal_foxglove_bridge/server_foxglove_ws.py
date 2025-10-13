@@ -12,7 +12,7 @@ from foxglove_websocket.server import FoxgloveServer, FoxgloveServerListener
 from foxglove_websocket.types import ChannelId, ChannelWithoutId, ClientChannel, ClientChannelId
 
 from importlib.metadata import version as importlib_version
-SERVER_VERSION = f"foxglove-ws {importlib_version("foxglove_websocket")}"
+SERVER_VERSION = f"foxglove-ws {importlib_version('foxglove_websocket')}"
 
 logger = logging.getLogger("FoxgloveServer")
 
@@ -145,7 +145,7 @@ class Server():
         await self.foxglove_server.__aenter__()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool | None:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> typing.Optional[bool]:
         return await self.foxglove_server.__aexit__(exc_type, exc_val, exc_tb)
     
     async def add_publisher(self, topic: Topic)-> None:

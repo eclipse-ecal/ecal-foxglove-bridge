@@ -8,6 +8,7 @@ import asyncio
 import argparse
 import logging
 import json
+import typing
 
 from .bridge_types import Topic, Data, Command, Action
 from .middleware_implementation import *
@@ -24,8 +25,8 @@ class Blacklist():
 
     def is_blacklisted(self, topic_name: str) -> bool:
         return topic_name in self.blacklist
-    
-def read_blacklist(filename: str | None) -> Blacklist:
+
+def read_blacklist(filename: typing.Optional[str]) -> Blacklist:
     if not filename:
         logger.info('No blacklist file specified')
         return Blacklist(set())
